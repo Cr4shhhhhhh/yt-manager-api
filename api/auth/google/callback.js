@@ -34,17 +34,18 @@ export default async function handler(req, res) {
       });
     }
 
-    return res.status(200).json({
-      ok: true,
-      message: "Google collegato correttamente",
-      tokens: {
-        access_token: data.access_token,
-        refresh_token: data.refresh_token || null,
-        expires_in: data.expires_in,
-        scope: data.scope,
-        token_type: data.token_type
-      }
-    });
+    const accessToken = data.access_token;
+
+    if (!accessToken) {
+      return res.status(500).json({
+        ok: false,
+        error: "No access token returned by Google"
+      });
+    }
+
+    return res.redirect(
+      `https://yt-manager-api.vercel.app/api/channel/overview?access_token=${encodeURIComponent(accessToken)}`
+    );
   } catch (error) {
     return res.status(500).json({
       ok: false,
