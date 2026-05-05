@@ -26,26 +26,16 @@ export default async function handler(req, res) {
 
     const data = await response.json();
 
-    if (!response.ok) {
-      return res.status(500).json({
-        ok: false,
-        step: "token_exchange",
-        error: data
-      });
-    }
-
-    const accessToken = data.access_token;
-
-    if (!accessToken) {
-      return res.status(500).json({
-        ok: false,
-        error: "No access token returned by Google"
-      });
-    }
-
-    return res.redirect(
-      `https://yt-manager-api.vercel.app/api/channel/live?access_token=${encodeURIComponent(accessToken)}`
-    );
+    return res.status(response.ok ? 200 : 500).json({
+      ok: response.ok,
+      has_access_token: !!data.access_token,
+      has_refresh_token: !!data.refresh_token,
+      refresh_token: data.refresh_token || null,
+      scope: data.scope || null,
+      token_type: data.token_type || null,
+      expires_in: data.expires_in || null,
+      raw_error: response.ok ? null : data
+    });
   } catch (error) {
     return res.status(500).json({
       ok: false,
