@@ -44,7 +44,7 @@ export default async function handler(req, res) {
     }
 
     return res.redirect(
-      `https://yt-manager-api.vercel.app/api/channel/overview?access_token=${encodeURIComponent(accessToken)}`
+      `https://yt-manager-api.vercel.app/api/channel/live?access_token=${encodeURIComponent(accessToken)}`
     );
   } catch (error) {
     return res.status(500).json({
