@@ -1,17 +1,61 @@
-export default function handler(req, res) {
-  res.status(200).json({
-    connected: false,
-    mode: "demo",
-    channelName: "CR4SHHHHHHH",
-    subscribers: 8225,
-    targetSubscribers: 10000,
-    missingSubscribers: 1775,
-    last28Days: {
-      subscribersGained: 109,
-      averageDailyGrowth: 36.3,
-      views: 18400,
-      watchTimeHours: 920
-    },
-    message: "API online. Dati demo attivi: il collegamento YouTube reale verrà aggiunto nel passaggio successivo."
-  });
+export default async function handler(req, res) {
+  const accessToken = req.query.access_token;
+
+  if (!accessToken) {
+    return res.status(400).json({
+      ok: false,
+      error: "Missing access_token"
+    });
+  }
+
+  try {
+    const channelResponse = await fetch(
+      "https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&mine=true",
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`
+        }
+      }
+    );
+
+    const channelData = await channelResponse.json();
+
+    if (!channelResponse.ok) {
+      return res.status(500).json({
+        ok: false,
+        step: "youtube_channels",
+        error: channelData
+      });
+    }
+
+    const channel = channelData.items?.[0];
+
+    if (!channel) {
+      return res.status(404).json({
+        ok: false,
+        error: "No channel found for this account"
+      });
+    }
+
+    const subscribers = Number(channel.statistics?.subscriberCount || 0);
+    const targetSubscribers = 10000;
+    const missingSubscribers = Math.max(targetSubscribers - subscribers, 0);
+
+    return res.status(200).json({
+      ok: true,
+      connected: true,
+      mode: "real",
+      channelName: channel.snippet?.title || null,
+      subscribers,
+      targetSubscribers,
+      missingSubscribers,
+      views: Number(channel.statistics?.viewCount || 0),
+      videos: Number(channel.statistics?.videoCount || 0)
+    });
+  } catch (error) {
+    return res.status(500).json({
+      ok: false,
+      error: error.message
+    });
+  }
 }
