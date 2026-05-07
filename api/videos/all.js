@@ -74,7 +74,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // 2) Scorri TUTTE le pagine della playlist uploads
+    // 2) Scorri tutte le pagine della uploads playlist
     let allPlaylistItems = [];
     let nextPageToken = null;
 
@@ -107,15 +107,20 @@ export default async function handler(req, res) {
       nextPageToken = playlistData.nextPageToken || null;
     } while (nextPageToken);
 
-    const videoIds = allPlaylistItems
+    const rawVideoIds = allPlaylistItems
       .map((item) => item.contentDetails?.videoId)
       .filter(Boolean);
 
-    if (videoIds.length === 0) {
+    const uniqueVideoIds = [...new Set(rawVideoIds)];
+
+    if (uniqueVideoIds.length === 0) {
       return res.status(200).json({
         channelName: channel.snippet?.title || null,
         totalVideosOnChannel: Number(channel.statistics?.videoCount || 0),
         totalReturned: 0,
+        totalUniqueReturned: 0,
+        duplicateCountRemoved: 0,
+        countsByType: {},
         videos: [],
         status: 'ok',
       });
@@ -155,7 +160,7 @@ export default async function handler(req, res) {
       return 'video';
     };
 
-    const videoIdChunks = chunkArray(videoIds, 50);
+    const videoIdChunks = chunkArray(uniqueVideoIds, 50);
     let allVideos = [];
 
     for (const chunk of videoIdChunks) {
@@ -206,28 +211,27 @@ export default async function handler(req, res) {
       allVideos = allVideos.concat(mappedVideos);
     }
 
-    // 4) Mantieni l'ordine originale della uploads playlist
+    // 4) Mantieni l'ordine originale della uploads playlist, ma senza duplicati
     const videosById = new Map(allVideos.map((video) => [video.videoId, video]));
-    const orderedVideos = videoIds
+    const orderedUniqueVideos = uniqueVideoIds
       .map((id) => videosById.get(id))
       .filter(Boolean);
 
     // 5) Statistiche riepilogative
-    const countsByType = orderedVideos.reduce(
-      (acc, video) => {
-        const type = video.contentType || 'unknown';
-        acc[type] = (acc[type] || 0) + 1;
-        return acc;
-      },
-      {}
-    );
+    const countsByType = orderedUniqueVideos.reduce((acc, video) => {
+      const type = video.contentType || 'unknown';
+      acc[type] = (acc[type] || 0) + 1;
+      return acc;
+    }, {});
 
     return res.status(200).json({
       channelName: channel.snippet?.title || null,
       totalVideosOnChannel: Number(channel.statistics?.videoCount || 0),
-      totalReturned: orderedVideos.length,
+      totalReturned: rawVideoIds.length,
+      totalUniqueReturned: orderedUniqueVideos.length,
+      duplicateCountRemoved: rawVideoIds.length - orderedUniqueVideos.length,
       countsByType,
-      videos: orderedVideos,
+      videos: orderedUniqueVideos,
       status: 'ok',
     });
   } catch (error) {
