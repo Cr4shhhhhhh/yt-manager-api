@@ -21,6 +21,9 @@ export default async function handler(req, res) {
       });
     }
 
+    const requestedLimit = Number(req.query.limit || 500);
+    const limit = Math.min(Math.max(requestedLimit, 1), 500);
+
     const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
       headers: {
@@ -45,7 +48,6 @@ export default async function handler(req, res) {
 
     const accessToken = tokenData.access_token;
 
-    // 1) Trova la uploads playlist del canale
     const channelUrl = new URL('https://www.googleapis.com/youtube/v3/channels');
     channelUrl.searchParams.set('part', 'contentDetails,snippet,statistics');
     channelUrl.searchParams.set('mine', 'true');
@@ -74,9 +76,9 @@ export default async function handler(req, res) {
       });
     }
 
-    // 2) Scorri tutte le pagine della uploads playlist
     let allPlaylistItems = [];
     let nextPageToken = null;
+    let uniqueIds = new Set();
 
     do {
       const playlistUrl = new URL('https://www.googleapis.com/youtube/v3/playlistItems');
@@ -103,30 +105,39 @@ export default async function handler(req, res) {
         });
       }
 
-      allPlaylistItems = allPlaylistItems.concat(playlistData.items || []);
+      for (const item of playlistData.items || []) {
+        const videoId = item.contentDetails?.videoId;
+        if (!videoId) continue;
+        if (!uniqueIds.has(videoId)) {
+          uniqueIds.add(videoId);
+          allPlaylistItems.push(item);
+          if (allPlaylistItems.length >= limit) break;
+        }
+      }
+
+      if (allPlaylistItems.length >= limit) {
+        break;
+      }
+
       nextPageToken = playlistData.nextPageToken || null;
     } while (nextPageToken);
 
-    const rawVideoIds = allPlaylistItems
+    const videoIds = allPlaylistItems
       .map((item) => item.contentDetails?.videoId)
       .filter(Boolean);
 
-    const uniqueVideoIds = [...new Set(rawVideoIds)];
-
-    if (uniqueVideoIds.length === 0) {
+    if (videoIds.length === 0) {
       return res.status(200).json({
         channelName: channel.snippet?.title || null,
         totalVideosOnChannel: Number(channel.statistics?.videoCount || 0),
         totalReturned: 0,
-        totalUniqueReturned: 0,
-        duplicateCountRemoved: 0,
+        requestedLimit: limit,
         countsByType: {},
         videos: [],
         status: 'ok',
       });
     }
 
-    // 3) Recupera dettagli completi dei video a blocchi da 50
     const chunkArray = (arr, size) => {
       const chunks = [];
       for (let i = 0; i < arr.length; i += size) {
@@ -160,7 +171,7 @@ export default async function handler(req, res) {
       return 'video';
     };
 
-    const videoIdChunks = chunkArray(uniqueVideoIds, 50);
+    const videoIdChunks = chunkArray(videoIds, 50);
     let allVideos = [];
 
     for (const chunk of videoIdChunks) {
@@ -195,8 +206,6 @@ export default async function handler(req, res) {
           videoId: video.id,
           title: video.snippet?.title || null,
           publishedAt: video.snippet?.publishedAt || null,
-          description: video.snippet?.description || null,
-          thumbnails: video.snippet?.thumbnails || {},
           duration: durationIso,
           durationSeconds,
           contentType,
@@ -211,14 +220,12 @@ export default async function handler(req, res) {
       allVideos = allVideos.concat(mappedVideos);
     }
 
-    // 4) Mantieni l'ordine originale della uploads playlist, ma senza duplicati
     const videosById = new Map(allVideos.map((video) => [video.videoId, video]));
-    const orderedUniqueVideos = uniqueVideoIds
+    const orderedVideos = videoIds
       .map((id) => videosById.get(id))
       .filter(Boolean);
 
-    // 5) Statistiche riepilogative
-    const countsByType = orderedUniqueVideos.reduce((acc, video) => {
+    const countsByType = orderedVideos.reduce((acc, video) => {
       const type = video.contentType || 'unknown';
       acc[type] = (acc[type] || 0) + 1;
       return acc;
@@ -227,11 +234,10 @@ export default async function handler(req, res) {
     return res.status(200).json({
       channelName: channel.snippet?.title || null,
       totalVideosOnChannel: Number(channel.statistics?.videoCount || 0),
-      totalReturned: rawVideoIds.length,
-      totalUniqueReturned: orderedUniqueVideos.length,
-      duplicateCountRemoved: rawVideoIds.length - orderedUniqueVideos.length,
+      requestedLimit: limit,
+      totalReturned: orderedVideos.length,
       countsByType,
-      videos: orderedUniqueVideos,
+      videos: orderedVideos,
       status: 'ok',
     });
   } catch (error) {
